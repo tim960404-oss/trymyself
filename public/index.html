@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>麻將記帳</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+    background: #1a3c2e;
+    color: #f5f0e6;
+    margin: 0;
+    padding: 16px;
+    min-height: 100vh;
+  }
+  .container { max-width: 480px; margin: 0 auto; }
+  h1 { text-align: center; font-size: 22px; margin-bottom: 20px; color: #f0c040; }
+  .card {
+    background: #234d3a;
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  label { display: block; margin: 8px 0 4px; font-size: 14px; color: #c8e6c9; }
+  input, select {
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #3a6b52;
+    background: #1a3c2e;
+    color: #fff;
+    font-size: 16px;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    margin-top: 14px;
+    border: none;
+    border-radius: 8px;
+    background: #f0c040;
+    color: #1a3c2e;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+  button:active { opacity: 0.8; }
+  .btn-secondary { background: #3a6b52; color: #fff; }
+  .btn-danger { background: #c0392b; color: #fff; }
+
+  .score-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .score-box {
+    background: #1a3c2e;
+    border-radius: 10px;
+    padding: 12px;
+    text-align: center;
+  }
+  .score-name { font-size: 14px; color: #c8e6c9; }
+  .score-amount { font-size: 22px; font-weight: bold; margin-top: 4px; }
+  .pos { color: #4caf50; }
+  .neg { color: #ff6b6b; }
+  .zero { color: #f5f0e6; }
+
+  .round-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    padding: 4px 0;
+    border-bottom: 1px solid #3a6b52;
+  }
+  .round-row:last-child { border-bottom: none; }
+  .hidden { display: none; }
+  .tai-input { display: flex; gap: 8px; align-items: center; }
+  .tai-input input { flex: 1; }
+  .tai-btn {
+    width: 40px; height: 40px; border-radius: 8px;
+    background: #3a6b52; color: #fff; border: none; font-size: 18px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🀄 麻將記帳</h1>
+
+  <!-- 步驟1: 設定玩家與金額 -->
+  <div class="card" id="setupCard">
+    <label>玩家1</label><input id="p1" placeholder="例如：阿明">
+    <label>玩家2</label><input id="p2" placeholder="例如：小華">
+    <label>玩家3</label><input id="p3" placeholder="例如：志強">
+    <label>玩家4</label><input id="p4" placeholder="例如：美玲">
+    <label>底分 (例如 100)</label><input id="baseScore" type="number" value="100">
+  <label>每台金額 (例如 20)</label><input id="unitPrice" type="number" value="20">
+    <button onclick="startGame()">開始對局</button>
+  </div>
+
+  <!-- 步驟2: 進行中 -->
+  <div class="card hidden" id="gameCard">
+    <div class="score-grid" id="scoreGrid"></div>
+  </div>
+
+  <div class="card hidden" id="roundCard">
+    <h3 style="margin-top:0">記錄這一局</h3>
+    <label>贏家</label>
+    <select id="winnerSelect"></select>
+    <label style="display:flex;align-items:center;gap:8px;margin-top:10px">
+      <input type="checkbox" id="selfDrawCheck" style="width:auto" onchange="toggleSelfDraw()">
+      自摸 (三家通付)
+    </label>
+    <div id="loserGroup">
+      <label>輸家 (放槓/被胡)</label>
+      <select id="loserSelect"></select>
+    </div>
+    <label>台數</label>
+    <div class="tai-input">
+      <button class="tai-btn" onclick="changeTai(-1)">−</button>
+      <input id="taiInput" type="number" value="1" min="0">
+      <button class="tai-btn" onclick="changeTai(1)">＋</button>
+    </div>
+    <button onclick="submitRound()">送出本局結果</button>
+    <button class="btn-secondary" onclick="undoLast()">撤回上一局</button>
+  </div>
+
+  <div class="card hidden" id="historyCard">
+    <h3 style="margin-top:0">每局紀錄</h3>
+    <div id="historyList"></div>
+  </div>
+
+  <div class="card hidden" id="endCard">
+    <button class="btn-danger" onclick="endGame()">結束本場對局</button>
+  </div>
+
+  <div class="card hidden" id="summaryCard">
+    <h3 style="margin-top:0">🏁 本場結算</h3>
+    <div class="score-grid" id="summaryGrid"></div>
+    <button onclick="resetAll()">開始新的一場</button>
+  </div>
+</div>
+
+<script>
+let gameId = null;
+let players = [];
+let unitPrice = 20;
+
+async function startGame() {
+  players = [
+    document.getElementById('p1').value.trim() || '玩家1',
+    document.getElementById('p2').value.trim() || '玩家2',
+    document.getElementById('p3').value.trim() || '玩家3',
+    document.getElementById('p4').value.trim() || '玩家4',
+  ];
+  unitPrice = parseInt(document.getElementById('unitPrice').value) || 20;
+  const baseScore = parseInt(document.getElementById('baseScore').value) || 0;
+
+  const res = await fetch('/api/games', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ players, baseScore, unitPrice })
+  });
+  const data = await res.json();
+  if (data.error || !data.id) {
+    alert('開局失敗: ' + (data.error || '未知錯誤'));
+    return;
+  }
+  gameId = data.id;
+
+  document.getElementById('setupCard').classList.add('hidden');
+  document.getElementById('gameCard').classList.remove('hidden');
+  document.getElementById('roundCard').classList.remove('hidden');
+  document.getElementById('historyCard').classList.remove('hidden');
+  document.getElementById('endCard').classList.remove('hidden');
+
+  // 填入選單
+  const wSel = document.getElementById('winnerSelect');
+  const lSel = document.getElementById('loserSelect');
+  wSel.innerHTML = players.map(p => `<option value="${p}">${p}</option>`).join('');
+  lSel.innerHTML = players.map(p => `<option value="${p}">${p}</option>`).join('');
+
+  renderScores({});
+  renderHistory([]);
+}
+
+function changeTai(delta) {
+  const input = document.getElementById('taiInput');
+  let val = parseInt(input.value) || 0;
+  val = Math.max(0, val + delta);
+  input.value = val;
+}
+
+async function submitRound() {
+  const winner = document.getElementById('winnerSelect').value;
+  const isSelfDraw = document.getElementById('selfDrawCheck').checked;
+  const loser = document.getElementById('loserSelect').value;
+  const tai = parseInt(document.getElementById('taiInput').value) || 0;
+
+  if (!isSelfDraw && winner === loser) {
+    alert('贏家與輸家不能相同');
+    return;
+  }
+
+  const res = await fetch(`/api/games/${gameId}/rounds`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ winner, loser: isSelfDraw ? null : loser, tai, isSelfDraw })
+  });
+  const data = await res.json();
+  if (data.error) {
+    alert(data.error);
+    return;
+  }
+  document.getElementById('taiInput').value = 1;
+  document.getElementById('selfDrawCheck').checked = false;
+  toggleSelfDraw();
+  await refreshGame();
+}
+
+function toggleSelfDraw() {
+  const checked = document.getElementById('selfDrawCheck').checked;
+  document.getElementById('loserGroup').classList.toggle('hidden', checked);
+}
+
+async function undoLast() {
+  await fetch(`/api/games/${gameId}/rounds/last`, { method: 'DELETE' });
+  await refreshGame();
+}
+
+async function refreshGame() {
+  const res = await fetch(`/api/games/${gameId}`);
+  const data = await res.json();
+  const totals = computeTotals(data.rounds);
+  renderScores(totals);
+  renderHistory(data.rounds);
+}
+
+function computeTotals(rounds) {
+  const totals = {};
+  players.forEach(p => totals[p] = 0);
+  rounds.forEach(r => {
+    if (r.is_self_draw) {
+      const perPerson = r.amount / 3;
+      totals[r.winner] = (totals[r.winner] || 0) + r.amount;
+      players.forEach(p => {
+        if (p !== r.winner) totals[p] = (totals[p] || 0) - perPerson;
+      });
+    } else {
+      totals[r.winner] = (totals[r.winner] || 0) + r.amount;
+      totals[r.loser] = (totals[r.loser] || 0) - r.amount;
+    }
+  });
+  return totals;
+}
+
+function renderScores(totals) {
+  const grid = document.getElementById('scoreGrid');
+  grid.innerHTML = players.map(p => {
+    const amt = totals[p] || 0;
+    const cls = amt > 0 ? 'pos' : amt < 0 ? 'neg' : 'zero';
+    const sign = amt > 0 ? '+' : '';
+    return `<div class="score-box">
+      <div class="score-name">${p}</div>
+      <div class="score-amount ${cls}">${sign}${amt}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderHistory(rounds) {
+  const list = document.getElementById('historyList');
+  if (rounds.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:#888;padding:8px">尚無紀錄</div>';
+    return;
+  }
+  list.innerHTML = rounds.map((r, i) => {
+    const desc = r.is_self_draw
+      ? `${r.winner} 自摸 ${r.tai}台 (三家通付)`
+      : `${r.winner} 贏 ${r.loser} ${r.tai}台`;
+    return `<div class="round-row">
+      <span>第${i+1}局</span>
+      <span>${desc}</span>
+      <span class="pos">+${r.amount}</span>
+    </div>`;
+  }).reverse().join('');
+}
+
+async function endGame() {
+  await fetch(`/api/games/${gameId}/end`, { method: 'POST' });
+  const res = await fetch(`/api/games/${gameId}`);
+  const data = await res.json();
+  const totals = computeTotals(data.rounds);
+
+  document.getElementById('gameCard').classList.add('hidden');
+  document.getElementById('roundCard').classList.add('hidden');
+  document.getElementById('historyCard').classList.add('hidden');
+  document.getElementById('endCard').classList.add('hidden');
+  document.getElementById('summaryCard').classList.remove('hidden');
+
+  const grid = document.getElementById('summaryGrid');
+  grid.innerHTML = players.map(p => {
+    const amt = totals[p] || 0;
+    const cls = amt > 0 ? 'pos' : amt < 0 ? 'neg' : 'zero';
+    const sign = amt > 0 ? '+' : '';
+    return `<div class="score-box">
+      <div class="score-name">${p}</div>
+      <div class="score-amount ${cls}">${sign}${amt}</div>
+    </div>`;
+  }).join('');
+}
+
+function resetAll() {
+  gameId = null;
+  document.getElementById('summaryCard').classList.add('hidden');
+  document.getElementById('setupCard').classList.remove('hidden');
+}
+</script>
+</body>
+</html>
