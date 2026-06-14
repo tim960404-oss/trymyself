@@ -134,4 +134,4 @@ app.get('/api/games', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`麻將記帳伺服器運行於 http://localhost:${PORT}`);
-});
+}); 
